@@ -1,83 +1,86 @@
-// script.js — fetches sales.csv, parses it and computes sum of sales where category <= 26
+document.addEventListener('DOMContentLoaded', () => {
+  fetch('sales.csv')
+    .then(resp => {
+      if (!resp.ok) throw new Error('Network response was not ok');
+      return resp.text();
+    })
+    .then(text => {
+      const rows = parseCSV(text);
+      if (rows.length === 0) throw new Error('No data');
 
-function parseCSVRow(row){
-  // Robust CSV row parser that handles quoted fields and commas inside quotes
-  const fields = [];
+      const header = rows[0].map(h => h.trim().toLowerCase());
+      const catIdx = header.indexOf('category');
+      const salesIdx = header.indexOf('sales');
+      if (catIdx === -1 || salesIdx === -1) {
+        throw new Error('Required columns not found');
+      }
+
+      let sum = 0;
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r) continue;
+        const cat = r[catIdx] ? r[catIdx].trim() : '';
+        const salesStr = r[salesIdx] ? r[salesIdx].trim() : '';
+        const catNum = Number(cat);
+        if (Number.isFinite(catNum) && catNum <= 26) {
+          const salesNum = parseFloat(salesStr.replace(/[^0-9.-]+/g, ''));
+          if (!Number.isNaN(salesNum)) sum += salesNum;
+        }
+      }
+
+      const out = document.getElementById('total-sales');
+      out.textContent = sum.toFixed(2);
+    })
+    .catch(err => {
+      console.error(err);
+      const out = document.getElementById('total-sales');
+      out.textContent = 'Error';
+    });
+});
+
+// Minimal CSV parser that supports quoted fields and double-quote escaping
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
   let cur = '';
   let inQuotes = false;
-  for(let i=0;i<row.length;i++){
-    const ch = row[i];
-    if(ch === '"'){
-      // handle double-quote escape ""
-      if(inQuotes && row[i+1] === '"'){
-        cur += '"';
-        i++; // skip next quote
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i+1];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (next === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
       } else {
-        inQuotes = !inQuotes;
+        cur += ch;
       }
-    } else if(ch === ',' && !inQuotes){
-      fields.push(cur);
-      cur = '';
     } else {
-      cur += ch;
-    }
-  }
-  fields.push(cur);
-  return fields;
-}
-
-function showStatus(msg){
-  const s = document.getElementById('status');
-  if(s) s.textContent = msg;
-}
-
-function showTotal(value){
-  const el = document.getElementById('total-sales');
-  if(el) el.textContent = value;
-}
-
-async function computeTotal(){
-  try{
-    showStatus('Fetching sales.csv…');
-    const res = await fetch('sales.csv');
-    if(!res.ok) throw new Error('Failed to fetch sales.csv: ' + res.status + ' ' + res.statusText);
-    const text = await res.text();
-    showStatus('Parsing CSV…');
-
-    const rows = text.split(/\r?\n/).filter(r=>r.trim().length>0);
-    if(rows.length === 0) throw new Error('CSV is empty');
-
-    const header = parseCSVRow(rows[0]);
-    const lower = header.map(h=>h.trim().toLowerCase());
-    const catIdx = lower.indexOf('category');
-    const salesIdx = lower.indexOf('sales');
-    if(catIdx === -1 || salesIdx === -1) throw new Error('CSV missing required columns');
-
-    let sum = 0;
-    for(let i=1;i<rows.length;i++){
-      const fields = parseCSVRow(rows[i]);
-      // skip malformed rows
-      if(fields.length <= Math.max(catIdx,salesIdx)) continue;
-      const catRaw = fields[catIdx].trim();
-      const salesRaw = fields[salesIdx].trim();
-      const cat = Number(catRaw);
-      const sales = Number(salesRaw);
-      if(Number.isFinite(cat) && Number.isFinite(sales)){
-        if(cat <= 26) sum += sales;
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        row.push(cur);
+        cur = '';
+      } else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && next === '\n') continue;
+        row.push(cur);
+        rows.push(row);
+        row = [];
+        cur = '';
+      } else {
+        cur += ch;
       }
     }
-
-    // Round to 2 decimals and display
-    const rounded = sum.toFixed(2);
-    showTotal(rounded);
-    showStatus('Done');
-  }catch(err){
-    console.error(err);
-    showStatus('Error: ' + err.message);
-    showTotal('N/A');
   }
+  // flush
+  if (cur !== '' || inQuotes || row.length > 0) {
+    row.push(cur);
+    rows.push(row);
+  }
+  // remove trailing empty row if present (e.g. final newline)
+  if (rows.length && rows[rows.length-1].length === 1 && rows[rows.length-1][0] === '') rows.pop();
+  return rows;
 }
-
-window.addEventListener('DOMContentLoaded', ()=>{
-  computeTotal();
-});
